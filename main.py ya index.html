@@ -1,0 +1,306 @@
+name: Android APK (AutoBuyer)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Generate project files on the runner ---
+      - name: Create Android project files
+        run: |
+          set -e
+          mkdir -p app/src/main/java/com/example/autobuyer app/src/main/res/layout app/src/main/res/values app/src/main/assets gradle/wrapper
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "AutoBuyer_Fixed"
+          include(":app")
+          EOF
+
+          cat > build.gradle <<'EOF'
+          buildscript { repositories { google(); mavenCentral() }
+            dependencies { classpath 'com.android.tools.build:gradle:8.3.2' } }
+          allprojects { repositories { google(); mavenCentral() } }
+          EOF
+
+          cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+          printf '#!/usr/bin/env sh\nexec ./gradlew "$@"\n' > gradlew && chmod +x gradlew
+          echo "@echo off\r\ncall gradlew.bat %*" > gradlew.bat
+
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'com.example.autobuyer'
+            compileSdk 34
+            defaultConfig {
+              applicationId "com.example.autobuyer"
+              minSdk 24
+              targetSdk 34
+              versionCode 1
+              versionName "1.0"
+            }
+            buildTypes {
+              release {
+                minifyEnabled false
+                proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+              }
+              debug { debuggable true }
+            }
+          }
+          dependencies {
+            implementation 'androidx.core:core-ktx:1.13.1'
+            implementation 'androidx.appcompat:appcompat:1.7.0'
+            implementation 'com.google.android.material:material:1.12.0'
+            implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+          }
+          EOF
+          touch app/proguard-rules.pro
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.autobuyer">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission/VIBRATE"/>
+            <application android:allowBackup="true" android:label="@string/app_name"
+              android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+            <string name="app_name">AutoBuyer PV</string>
+            <string name="start">Start</string>
+            <string name="stop">Stop</string>
+            <string name="load">Load</string>
+            <string name="save">Save</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent">
+            <ScrollView android:layout_width="match_parent" android:layout_height="wrap_content">
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:orientation="vertical" android:padding="12dp">
+                <EditText android:id="@+id/url" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="URL" android:inputType="textUri"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                  <EditText android:id="@+id/minPrice" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Min Price (20000)" android:inputType="number"/>
+                  <EditText android:id="@+id/maxPrice" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Max Price (100000)" android:inputType="number"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                  <EditText android:id="@+id/refreshSec" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Refresh (sec) 20" android:inputType="number"/>
+                  <EditText android:id="@+id/stuckSec" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Stuck timeout (sec) 10" android:inputType="number"/>
+                </LinearLayout>
+                <EditText android:id="@+id/priceSel" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Price selector"/>
+                <EditText android:id="@+id/buySel" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Buy button selector"/>
+                <EditText android:id="@+id/refreshSel" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Refresh button selector (optional)"/>
+                <EditText android:id="@+id/qtySel" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Quantity input selector (optional)"/>
+                <EditText android:id="@+id/qtyVal" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Quantity value (optional)"/>
+                <EditText android:id="@+id/successSel" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Success selector (optional)"/>
+                <EditText android:id="@+id/successText" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Success keyword (optional)"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                  <Button android:id="@+id/saveBtn" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/save"/>
+                  <Button android:id="@+id/loadBtn" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/load"/>
+                  <Button android:id="@+id/startBtn" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/start"/>
+                  <Button android:id="@+id/stopBtn" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/stop"/>
+                </LinearLayout>
+              </LinearLayout>
+            </ScrollView>
+            <WebView android:id="@+id/web" android:layout_width="match_parent" android:layout_height="match_parent"/>
+          </androidx.coordinatorlayout.widget.CoordinatorLayout>
+          EOF
+
+          cat > app/src/main/java/com/example/autobuyer/MainActivity.kt <<'EOF'
+          package com.example.autobuyer
+          import android.annotation.SuppressLint
+          import android.media.AudioManager
+          import android.media.ToneGenerator
+          import android.os.Bundle
+          import android.os.VibrationEffect
+          import android.os.Vibrator
+          import android.webkit.JavascriptInterface
+          import android.webkit.WebChromeClient
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.*
+          import androidx.appcompat.app.AppCompatActivity
+          import org.json.JSONObject
+          class MainActivity : AppCompatActivity() {
+              private lateinit var web: WebView
+              private var running = false
+              @SuppressLint("SetJavaScriptEnabled")
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+                  val url = findViewById<EditText>(R.id.url)
+                  val minPrice = findViewById<EditText>(R.id.minPrice)
+                  val maxPrice = findViewById<EditText>(R.id.maxPrice)
+                  val refreshSec = findViewById<EditText>(R.id.refreshSec)
+                  val stuckSec = findViewById<EditText>(R.id.stuckSec)
+                  val priceSel = findViewById<EditText>(R.id.priceSel)
+                  val buySel = findViewById<EditText>(R.id.buySel)
+                  val refreshSel = findViewById<EditText>(R.id.refreshSel)
+                  val qtySel = findViewById<EditText>(R.id.qtySel)
+                  val qtyVal = findViewById<EditText>(R.id.qtyVal)
+                  val successSel = findViewById<EditText>(R.id.successSel)
+                  val successText = findViewById<EditText>(R.id.successText)
+                  val saveBtn = findViewById<Button>(R.id.saveBtn)
+                  val loadBtn = findViewById<Button>(R.id.loadBtn)
+                  val startBtn = findViewById<Button>(R.id.startBtn)
+                  val stopBtn = findViewById<Button>(R.id.stopBtn)
+                  web = findViewById(R.id.web)
+                  web.settings.javaScriptEnabled = true
+                  web.settings.domStorageEnabled = true
+                  web.webChromeClient = WebChromeClient()
+                  web.webViewClient = object: WebViewClient() {
+                      override fun onPageFinished(view: WebView?, urlStr: String?) {
+                          super.onPageFinished(view, urlStr)
+                          if (running) {
+                              val js = assets.open("autoclicker.js").bufferedReader().use { it.readText() }
+                              web.evaluateJavascript(js, null)
+                              val cfg = JSONObject().apply {
+                                  put("minPrice", (minPrice.text.toString().ifBlank { "20000" }).toDouble())
+                                  put("maxPrice", (maxPrice.text.toString().ifBlank { "100000" }).toDouble())
+                                  put("refreshEverySec", (refreshSec.text.toString().ifBlank { "20" }).toInt())
+                                  put("stuckTimeoutSec", (stuckSec.text.toString().ifBlank { "10" }).toInt())
+                                  put("priceSelector", priceSel.text.toString())
+                                  put("buyButtonSelector", buySel.text.toString())
+                                  put("refreshButtonSelector", refreshSel.text.toString())
+                                  put("quantitySelector", qtySel.text.toString())
+                                  put("quantityValue", qtyVal.text.toString())
+                                  put("successSelector", successSel.text.toString())
+                                  put("successText", successText.text.toString())
+                                  put("maxOrders", 1)
+                              }
+                              web.evaluateJavascript("window.AutoClicker && AutoClicker.start(${cfg.toString()});", null)
+                              Toast.makeText(this@MainActivity, "AutoClicker injected", Toast.LENGTH_SHORT).show()
+                          }
+                      }
+                  }
+                  web.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+                  url.setText("https://www.paisavault.com/")
+                  minPrice.setText("20000"); maxPrice.setText("100000"); refreshSec.setText("20"); stuckSec.setText("10")
+                  saveBtn.setOnClickListener {
+                      getPrefs().edit().apply {
+                          putString("url", url.text.toString())
+                          putString("minPrice", minPrice.text.toString())
+                          putString("maxPrice", maxPrice.text.toString())
+                          putString("refreshSec", refreshSec.text.toString())
+                          putString("stuckSec", stuckSec.text.toString())
+                          putString("priceSel", priceSel.text.toString())
+                          putString("buySel", buySel.text.toString())
+                          putString("refreshSel", refreshSel.text.toString())
+                          putString("qtySel", qtySel.text.toString())
+                          putString("qtyVal", qtyVal.text.toString())
+                          putString("successSel", successSel.text.toString())
+                          putString("successText", successText.text.toString())
+                      }.apply()
+                      Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+                  }
+                  loadBtn.setOnClickListener {
+                      url.setText(getPrefs().getString("url", "https://www.paisavault.com/"))
+                      minPrice.setText(getPrefs().getString("minPrice", "20000"))
+                      maxPrice.setText(getPrefs().getString("maxPrice", "100000"))
+                      refreshSec.setText(getPrefs().getString("refreshSec", "20"))
+                      stuckSec.setText(getPrefs().getString("stuckSec", "10"))
+                      priceSel.setText(getPrefs().getString("priceSel", ""))
+                      buySel.setText(getPrefs().getString("buySel", ""))
+                      refreshSel.setText(getPrefs().getString("refreshSel", ""))
+                      qtySel.setText(getPrefs().getString("qtySel", ""))
+                      qtyVal.setText(getPrefs().getString("qtyVal", ""))
+                      successSel.setText(getPrefs().getString("successSel", ""))
+                      successText.setText(getPrefs().getString("successText", ""))
+                      Toast.makeText(this, "Loaded", Toast.LENGTH_SHORT).show()
+                  }
+                  startBtn.setOnClickListener { running = true; web.loadUrl(url.text.toString()) }
+                  stopBtn.setOnClickListener { running = false; web.evaluateJavascript("window.AutoClicker && AutoClicker.stop && AutoClicker.stop();", null); Toast.makeText(this, "Stopped", Toast.LENGTH_SHORT).show() }
+              }
+              private fun getPrefs() = getSharedPreferences("cfg", MODE_PRIVATE)
+              inner class AndroidBridge {
+                  @JavascriptInterface fun alarm() {
+                      try { val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 100); tone.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 500) } catch (_: Exception) {}
+                      try {
+                          val vib = getSystemService(VIBRATOR_SERVICE) as Vibrator
+                          if (android.os.Build.VERSION.SDK_INT >= 26) vib.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE))
+                          else @Suppress("DEPRECATION") vib.vibrate(500)
+                      } catch (_: Exception) {}
+                  }
+                  @JavascriptInterface fun toast(msg: String) { runOnUiThread { Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show() } }
+              }
+          }
+          EOF
+
+          cat > app/src/main/assets/autoclicker.js <<'EOF'
+          (function(){
+            if (window.AutoClicker) return;
+            function $(sel, root){ if(!sel) return null; try { return (root||document).querySelector(sel); } catch(e){return null;} }
+            function parseNumber(txt){ if(!txt) return NaN; var cleaned=(""+txt).replace(/[^\d.,-]/g,"").replace(/,/g,""); var n=parseFloat(cleaned); return isNaN(n)?NaN:n; }
+            function beep(){ if(window.AndroidBridge && AndroidBridge.alarm){ AndroidBridge.alarm(); } }
+            function toast(s){ if(window.AndroidBridge && AndroidBridge.toast){ AndroidBridge.toast(String(s)); } }
+            var state={running:false,lastClick:0,orders:0,rf:null,lp:null};
+            function clickEl(el){ if(!el) return false; el.scrollIntoView({behavior:"smooth",block:"center"}); el.click(); return true; }
+            function isSuccessVisible(cfg){ if(cfg.successSelector && $(cfg.successSelector)) return true; if(cfg.successText && (document.body.innerText||'').toLowerCase().indexOf(cfg.successText.toLowerCase())>=0) return true; return false; }
+            function refresh(cfg){ var b=$(cfg.refreshButtonSelector); if(b){ clickEl(b);} else { location.reload(); } }
+            function setQuantity(cfg){ if(!cfg.quantitySelector||!cfg.quantityValue) return; var q=$(cfg.quantitySelector); if(q){ q.focus(); q.value=cfg.quantityValue; q.dispatchEvent(new Event('input',{bubbles:true})); q.dispatchEvent(new Event('change',{bubbles:true})); } }
+            function loop(cfg){
+              if(!state.running) return;
+              var priceEl=$(cfg.priceSelector); var price=priceEl?parseNumber(priceEl.innerText||priceEl.textContent):NaN;
+              if(!isNaN(price)){
+                var box=document.getElementById('ac-overlay')||(function(){var d=document.createElement('div'); d.id='ac-overlay'; d.style.cssText='position:fixed;right:10px;bottom:10px;background:rgba(0,0,0,.7);color:#fff;padding:6px 8px;border-radius:8px;z-index:999999;'; document.body.appendChild(d); return d;})();
+                box.textContent='AutoClicker ON • Price: '+price+' • Orders: '+state.orders;
+              }
+              if(!isNaN(price) && price>=Math.min(cfg.minPrice,cfg.maxPrice) && price<=Math.max(cfg.minPrice,cfg.maxPrice)){
+                if(state.orders>=cfg.maxOrders) return;
+                var now=Date.now(); if(now-state.lastClick<1500) return;
+                var buy=$(cfg.buyButtonSelector);
+                if(buy){ setQuantity(cfg); clickEl(buy); state.orders+=1; state.lastClick=now; toast('Clicked BUY @ '+price);
+                  var timeout=Math.max(1,cfg.stuckTimeoutSec||10)*1000;
+                  setTimeout(function(){ if(!isSuccessVisible(cfg)){ beep(); toast('Order may be stuck'); } }, timeout);
+                }
+              }
+            }
+            function start(cfg){ state.running=true; toast('AutoClicker started'); if(cfg.refreshEverySec&&cfg.refreshEverySec>0){ if(state.rf) clearInterval(state.rf); state.rf=setInterval(function(){ if(state.running) refresh(cfg); }, cfg.refreshEverySec*1000);} if(state.lp) clearInterval(state.lp); state.lp=setInterval(function(){ loop(cfg); }, 500); }
+            function stop(){ state.running=false; if(state.rf) clearInterval(state.rf); if(state.lp) clearInterval(state.lp); var box=document.getElementById('ac-overlay'); if(box) box.remove(); toast('AutoClicker stopped'); }
+            window.AutoClicker={start:start,stop:stop};
+          })();
+          EOF
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build Debug APK
+        uses: gradle/gradle-build-action@v2
+        with:
+          gradle-version: 8.6
+          arguments: :app:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
